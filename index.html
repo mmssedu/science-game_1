@@ -2256,7 +2256,17 @@ function drawSprite(x, y, w, h){
   const dx = x + w * 0.5 - dw * 0.5;
   const dy = y + h - dh;
 
-  ctx.drawImage(img, dx, dy, dw, dh);
+  // 왼쪽을 바라본 상태에서 점프하면 jump.png를 좌우 반전해서 표시
+  // 오른쪽을 바라본 상태에서 점프하면 원본 jump.png 그대로 표시
+  if(pose === 'jump' && player.facing < 0){
+    ctx.save();
+    ctx.translate(dx + dw / 2, dy + dh / 2);
+    ctx.scale(-1, 1);
+    ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+    ctx.restore();
+  } else {
+    ctx.drawImage(img, dx, dy, dw, dh);
+  }
 }
 
 function drawPlayer(){
