@@ -297,49 +297,33 @@ let actionLatch = false;
 let showPath = true;
 let pathToggleLatch = false;
 
-// ===== 스프라이트 이미지 (5개 개별 파일) =====
-// setup_deploy.html 도구로 base64 데이터를 자동 삽입합니다.
-// 모두 비어있으면 픽셀아트 폴백으로 동작합니다.
-const IMG_DATA = {
-  hurt:   '',   // [1] 피해 입었을 때
-  jump:   '',   // [2] 점프 / 달리기
-  walk_l: '',   // [3] 왼쪽 이동 (좌향 전용 이미지)
-  walk_r: '',   // [4] 오른쪽 이동 (우향 전용 이미지)
-  idle:   '',   // [5] 서있을 때
+// ===== 스프라이트 이미지 =====
+// GitHub Pages 배포용: HTML 파일과 같은 저장소의 assets/character/ 폴더에
+// 아래 5개 PNG 파일을 업로드하면 캐릭터 이미지가 적용됩니다.
+const SPRITE_FILES = {
+  hurt:  'assets/character/hurt.png',   // 데미지 입은 상태 240×412
+  jump:  'assets/character/jump.png',   // 점프 241×412
+  left:  'assets/character/left.png',   // 왼쪽 이동 241×412
+  right: 'assets/character/right.png',  // 오른쪽 이동 241×413
+  stand: 'assets/character/stand.png',  // 기본 상태 241×413
 };
-const SPRITES = {};
-let _spriteLoadedCount = 0;
-const _SPRITE_KEYS = Object.keys(IMG_DATA);
+let spriteReady = false;
+const spriteImages = {};
+(function initSprite(){
+  const names = Object.keys(SPRITE_FILES);
+  let loaded = 0;
 
-function spriteReady(){
-  return _spriteLoadedCount >= _SPRITE_KEYS.length && Object.keys(SPRITES).length > 0;
-}
-
-(function initSprites(){
-  const hasAny = _SPRITE_KEYS.some(k => IMG_DATA[k] !== '');
-  if(!hasAny) return;
-
-  function removeBlack(img){
-    const oc = document.createElement('canvas');
-    oc.width = img.naturalWidth; oc.height = img.naturalHeight;
-    const ot = oc.getContext('2d');
-    ot.drawImage(img, 0, 0);
-    const id = ot.getImageData(0, 0, oc.width, oc.height);
-    const d = id.data;
-    for(let i = 0; i < d.length; i += 4){
-      if(d[i] < 45 && d[i+1] < 45 && d[i+2] < 45) d[i+3] = 0;
-    }
-    ot.putImageData(id, 0, 0);
-    return oc;
-  }
-
-  _SPRITE_KEYS.forEach(key => {
-    const b64 = IMG_DATA[key];
-    if(!b64){ _spriteLoadedCount++; return; }
+  names.forEach(name => {
     const img = new Image();
-    img.onload  = () => { SPRITES[key] = removeBlack(img); _spriteLoadedCount++; };
-    img.onerror = () => { _spriteLoadedCount++; };
-    img.src = 'data:image/png;base64,' + b64;
+    img.onload = () => {
+      loaded++;
+      if(loaded === names.length) spriteReady = true;
+    };
+    img.onerror = () => {
+      console.warn('캐릭터 이미지를 불러오지 못했습니다:', SPRITE_FILES[name]);
+    };
+    img.src = SPRITE_FILES[name];
+    spriteImages[name] = img;
   });
 })();
 
@@ -2251,53 +2235,34 @@ function drawPixelPlayer(){
 }
 
 // ===== 스프라이트 렌더링 =====
-/* 5개 개별 이미지 (검은 배경 자동 제거):
-   hurt   → 피해 입었을 때 [1]  기본 우향, 좌향 시 반전
-   jump   → 점프 / 공중   [2]  기본 우향, 좌향 시 반전
-   walk_l → 왼쪽 이동     [3]  이미 좌향 렌더링, 반전 불필요
-   walk_r → 오른쪽 이동   [4]  이미 우향 렌더링, 반전 불필요
-   idle   → 서있을 때     [5]  기본 우향, 좌향 시 반전          */
 function drawSprite(x, y, w, h){
-  let key, flip = false;
+  // 첨부 이미지 5종을 상태별로 직접 사용
+  let pose;
+  if(player.hurt > 0)              pose = 'hurt';
+  else if(!player.onGround)        pose = 'jump';
+  else if(player.vx < 0)           pose = 'left';
+  else if(player.vx > 0)           pose = 'right';
+  else                             pose = 'stand';
 
-  if(player.hurt > 0){
-    key = 'hurt';
-    flip = player.facing < 0;
-  } else if(!player.onGround){
-    key = 'jump';
-    flip = player.facing < 0;
-  } else if(player.vx < 0){
-    key = 'walk_l';          // 전용 좌향 — 반전 불필요
-  } else if(player.vx > 0){
-    key = 'walk_r';          // 전용 우향 — 반전 불필요
-  } else {
-    key = 'idle';
-    flip = player.facing < 0;
+  const img = spriteImages[pose];
+  if(!img || !img.complete || img.naturalWidth === 0){
+    drawPixelPlayer();
+    return;
   }
 
-  const spr = SPRITES[key];
-  if(!spr) return;
-
-  // 표시 크기: 히트박스 높이의 2.0배, 가로는 원본 비율 유지
-  const dh = h * 2.0;
-  const dw = dh * (spr.width / spr.height);
+  // 표시 크기: 기존 히트박스 높이 기준 1.7배, 원본 비율 유지
+  const dh = h * 1.7;
+  const dw = dh * (img.naturalWidth / img.naturalHeight);
   const dx = x + w * 0.5 - dw * 0.5;
   const dy = y + h - dh;
 
-  ctx.save();
-  if(flip){
-    ctx.translate(dx + dw * 0.5, dy + dh * 0.5);
-    ctx.scale(-1, 1);
-    ctx.translate(-(dx + dw * 0.5), -(dy + dh * 0.5));
-  }
-  ctx.drawImage(spr, dx, dy, dw, dh);
-  ctx.restore();
+  ctx.drawImage(img, dx, dy, dw, dh);
 }
 
 function drawPlayer(){
   const x = player.x, y = player.y, w = player.w, h = player.h;
 
-  if(spriteReady()){
+  if(spriteReady){
     ctx.save();
     // 무적시간 깜빡임
     if(player.hurt > 0 && Math.floor(player.hurt*10)%2===0) ctx.globalAlpha = 0.5;
