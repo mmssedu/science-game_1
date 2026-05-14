@@ -97,7 +97,6 @@
   #btnJump  { right: 110px; bottom: 100px; background: rgba(80,180,120,0.5); }
   #btnAct   { right: 20px;  bottom: 30px;  background: rgba(255,180,80,0.5); }
   #btnReset { right: 110px; bottom: 30px; font-size: 12px; }
-  #btnPath  { right: 20px;  top: 12px; background: rgba(120,180,255,0.5); }
 
   .touch-controls { display: none; }
   .touch-controls.active { display: block; }
@@ -230,7 +229,6 @@
   <button class="touch-btn" id="btnJump">▲</button>
   <button class="touch-btn" id="btnAct">작동</button>
   <button class="touch-btn small" id="btnReset">재시작</button>
-  <button class="touch-btn small" id="btnPath">경로</button>
 </div>
 
 <!-- Title Screen -->
@@ -243,13 +241,12 @@
       <div class="col">
         <b>⌨ PC 조작</b><br>
         ← → : 이동 &nbsp; ↑/Space : 점프<br>
-        E : 작동 &nbsp; R : 재시작 &nbsp; P : 경로 보기
+        E : 작동 &nbsp; R : 재시작
       </div>
       <div class="col">
         <b>📱 태블릿 터치</b><br>
         화면 좌하단: 이동 버튼<br>
-        화면 우하단: 점프/작동/재시작<br>
-        우상단: 빛의 경로 보기
+        화면 우하단: 점프/작동/재시작
       </div>
     </div>
   </div>
@@ -294,8 +291,6 @@ const TILE = 40;                    // 타일 크기
 const keys = { left: false, right: false, up: false, action: false };
 let actionPressed = false;          // E 키 한번만 트리거
 let actionLatch = false;
-let showPath = true;
-let pathToggleLatch = false;
 
 // ===== 스프라이트 이미지 =====
 // GitHub Pages 배포용: HTML 파일과 같은 저장소의 assets/character/ 폴더에
@@ -337,6 +332,7 @@ let messageTimer = 0;
 let messageText = '';
 let stageIntroTimer = 0;
 let particles = [];                 // 효과 파티클
+let lifeResetPending = false;       // Life 0 처리 중 중복 재시작 방지
 
 // ===== 유틸 =====
 const clamp = (v,a,b) => Math.max(a, Math.min(b,v));
@@ -509,13 +505,14 @@ const STAGES = [
       // 거울A 중심(220,200): right->down (\) angle=1
       {x:200, y:180, angle:0, leverId:'L1'},
       // 거울B 중심(220,400): down->right (/) angle=0
-      {x:200, y:380, angle:1, leverId:'L2'},
+      // 기본값이 이미 정답이므로 L2는 건드리면 실패하는 함정 레버
+      {x:200, y:380, angle:0, leverId:'L2'},
       // 거울C 중심(1100,400): right->up (/) angle=0
       {x:1080, y:380, angle:1, leverId:'L3'},
     ],
     levers:  [
       {x:220, y:500, id:'L1', on:false},
-      {x:460, y:420, id:'L2', on:false},
+      {x:460, y:420, id:'L2', on:false},   // 함정: 이미 맞은 거울을 틀어버림
       {x:1100,y:500, id:'L3', on:false},
     ],
     switches: [],
@@ -523,21 +520,21 @@ const STAGES = [
     sensors: [{x:1100, y:200, dir:'down', on:false}],
     doors:   [{x:1180, y:550, w:30, h:110, requiredSensors:[0], open:false}],
     exits:   [{x:1200, y:560, w:50, h:100}],
-    clearMsg: 'Stage 2 클리어! 여러 거울로 빛의 경로를 ㄷ자로 설계했습니다.'
+    clearMsg: 'Stage 2 클리어! 필요한 거울만 돌리고, 이미 맞은 거울은 그대로 두었습니다.'
   },
 
   /* ============== STAGE 3 ============== */
   {
     name: 'Stage 3',
-    description: '굴절 - 어떤 스위치를 켜고 어떤 것은 꺼야 할까요?',
+    description: '굴절 - 먼저 보이는 스위치가 항상 정답은 아닙니다.',
     spawn: { x: 80, y: 580 },
     platforms: [
       {x:0, y:660, w:1280, h:60},
       {x:0, y:0, w:20, h:720},
       {x:1260, y:0, w:20, h:720},
-      {x:200, y:560, w:140, h:20},      // S1 스위치 발판
+      {x:200, y:560, w:140, h:20},      // S2 스위치 발판 (함정!)
       {x:480, y:560, w:140, h:20},
-      {x:760, y:560, w:140, h:20},      // S2 스위치 발판 (함정!)
+      {x:760, y:560, w:140, h:20},      // S1 스위치 발판
       {x:1020, y:560, w:140, h:20},
       // 빛 차단벽: y=180~210, 직진하는 y=200 빛을 막고, 굴절된 y=216 빛만 통과
       {x:1100, y:180, w:60, h:25},
@@ -554,8 +551,8 @@ const STAGES = [
     mirrors: [],
     levers:  [],
     switches: [
-      {x:240, y:520, id:'S1', on:false},   // 물 블록 활성화 (켜야 함)
-      {x:820, y:520, id:'S2', on:false},   // 유리 블록 활성화 (켜면 실패!)
+      {x:240, y:520, id:'S2', on:false},   // 함정: 시작점에서 먼저 보이지만 켜면 실패
+      {x:820, y:520, id:'S1', on:false},   // 정답: 물 블록 활성화
     ],
     waterBlocks: [
       // S1 OFF: posA=(540, 380, 빛 경로 밖)
@@ -573,7 +570,7 @@ const STAGES = [
     sensors: [{x:1180, y:216, dir:'left', on:false}],
     doors:   [{x:1180, y:550, w:30, h:110, requiredSensors:[0], open:false}],
     exits:   [{x:1200, y:560, w:50, h:100}],
-    clearMsg: 'Stage 3 클리어! 물은 굴절이 필요했지만, 추가 유리는 빛을 더 어긋나게 했어요.'
+    clearMsg: 'Stage 3 클리어! 먼저 보이는 유리 스위치는 피하고, 필요한 물 스위치만 작동시켰습니다.'
   },
 
   /* ============== STAGE 4 ============== */
@@ -596,7 +593,7 @@ const STAGES = [
       {x:300, y:640, w:160, h:20},
       {x:560, y:640, w:160, h:20},
       {x:820, y:640, w:160, h:20},
-      {x:1100, y:640, w:80, h:20},
+      {x:1080, y:640, w:60, h:20},
     ],
     /* 설계:
        광원1 (60,200) right -> 거울A (220,200) -> down -> 센서0 (220,400)
@@ -648,8 +645,8 @@ const STAGES = [
     // 센서0: 거울 아래쪽 (220, 500), 위 방향에서 받음
     // 센서1: 우측 끝, 광원2가 굴절 후 +16 이동 -> y=416
     sensors: [
-      {x:220, y:540, dir:'up', on:false},
-      {x:1180,y:416, dir:'left', on:false},
+      {x:220, y:540, dir:'up', color:'#ffe680', on:false},
+      {x:1180,y:416, dir:'left', color:'#a0e8ff', on:false},
     ],
     doors:   [{x:1180, y:540, w:30, h:120, requiredSensors:[0,1], open:false}],
     exits:   [{x:1200, y:560, w:50, h:100}],
@@ -680,7 +677,7 @@ const STAGES = [
       {x:620, y:640, w:100, h:20},
       {x:800, y:640, w:100, h:20},
       {x:980, y:640, w:100, h:20},
-      {x:1160,y:640, w:60, h:20},
+      {x:1100,y:640, w:40, h:20},
     ],
     /* 최종 퍼즐 설계:
        광원1 (60,200) right -> 거울A(220,200,\) -> down -> 센서0(220,540)
@@ -769,9 +766,9 @@ const STAGES = [
     ],
     barriers: [],
     sensors: [
-      {x:220, y:500, dir:'up',   on:false},   // 센서0
-      {x:1100,y:100, dir:'down', on:false},   // 센서1
-      {x:660, y:100, dir:'down', on:false},   // 센서2
+      {x:220, y:500, dir:'up',   color:'#ffe680', on:false},   // 노란빛 센서
+      {x:1100,y:100, dir:'down', color:'#a0e8ff', on:false},   // 파란빛 센서
+      {x:660, y:100, dir:'down', color:'#ff9bff', on:false},   // 분홍빛 센서
     ],
     doors:   [{x:1180, y:540, w:30, h:120, requiredSensors:[0,1,2], open:false}],
     exits:   [{x:1200, y:560, w:50, h:100}],
@@ -781,7 +778,7 @@ const STAGES = [
   /* ============== STAGE 6 ============== */
   {
     name: 'Stage 6',
-    description: '다이얼 거울 입문 - E 키로 각도를 돌려 빛을 정확히 반사시키세요!',
+    description: '다이얼 거울 입문 - 10도씩 회전시켜 비스듬한 센서에 빛을 맞추세요!',
     spawn: {x:80, y:580},
     platforms: [
       {x:0, y:660, w:1280, h:60},
@@ -800,25 +797,24 @@ const STAGES = [
       {x:600, y:640, w:100, h:20},
       {x:800, y:640, w:70, h:20},
       {x:1000, y:640, w:80, h:20},
-      {x:1160, y:640, w:60, h:20},
+      {x:1100, y:640, w:40, h:20},
     ],
-    /* 설계: 광원(60,300)right → 다이얼거울D1(900,280 중심920,300)
-       default=0(/) right→up (실패), 정답=1(\) right→down → 센서(920,500) */
+    // 광원 → D1. D1을 30°로 맞추면 빛이 비스듬히 내려가 센서에 도달합니다.
     lightSources: [{x:60, y:300, dir:'right', color:'#ffe680'}],
-    mirrors: [{x:900, y:280, angle:0, dialId:'D1'}],
-    dials: [{x:910, y:520, id:'D1', angle:0}],
+    mirrors: [{x:900, y:280, angle:0, angleDeg:0, dialId:'D1'}],
+    dials: [{x:910, y:520, id:'D1', angle:0, angleDeg:0}],
     levers: [], switches: [],
     waterBlocks: [], glassBlocks: [], barriers: [],
-    sensors: [{x:920, y:490, dir:'up', on:false}],
+    sensors: [{x:1040, y:508, dir:'up', color:'#ffe680', on:false}],
     doors: [{x:1180, y:550, w:30, h:110, requiredSensors:[0], open:false}],
     exits: [{x:1200, y:560, w:50, h:100}],
-    clearMsg: 'Stage 6 클리어! 다이얼을 1칸 돌려 135°(\\)로 맞추면 빛이 아래로 반사됩니다!'
+    clearMsg: 'Stage 6 클리어! 10도 단위 조절로 비스듬한 반사 경로를 완성했습니다!'
   },
 
   /* ============== STAGE 7 ============== */
   {
     name: 'Stage 7',
-    description: '이중 다이얼 - 두 거울의 각도를 각각 맞춰야 빛이 목표에 닿습니다!',
+    description: '이중 다이얼 - 빛과 같은 색 센서가 켜지도록 두 거울을 10도씩 조절하세요!',
     spawn: {x:80, y:580},
     platforms: [
       {x:0, y:660, w:1280, h:60},
@@ -840,31 +836,33 @@ const STAGES = [
       {x:1000, y:640, w:80, h:20},
       {x:1160, y:640, w:60, h:20},
     ],
-    /* 설계: 광원(1220,200)left
-       D1(400,180 중심420,200): default=2(—) left→null, 정답=1(\) left→up
-       빛 위로→ D2(400,40 중심420,60): default=3(|) up→null, 정답=0(/) up→right
-       빛 오른쪽→ 센서(1180,60) dir:left */
-    lightSources: [{x:1220, y:200, dir:'left', color:'#ffe680'}],
+    lightSources: [
+      {x:60,   y:200, dir:'right', color:'#ffe680'},
+      {x:1220, y:300, dir:'left',  color:'#a0e8ff'},
+    ],
     mirrors: [
-      {x:400, y:180, angle:2, dialId:'D1'},
-      {x:400, y:20,  angle:3, dialId:'D2'},
+      {x:400, y:180, angle:0, angleDeg:0,  dialId:'D1'},
+      {x:880, y:280, angle:3, angleDeg:90, dialId:'D2'},
     ],
     dials: [
-      {x:510, y:520, id:'D1', angle:2},
-      {x:890, y:520, id:'D2', angle:3},
+      {x:510, y:460, id:'D1', angle:0, angleDeg:0},
+      {x:890, y:520, id:'D2', angle:3, angleDeg:90},
     ],
     levers: [], switches: [],
     waterBlocks: [], glassBlocks: [], barriers: [],
-    sensors: [{x:1180, y:40, dir:'left', on:false}],
-    doors: [{x:80, y:550, w:30, h:110, requiredSensors:[0], open:false}],
+    sensors: [
+      {x:540,  y:408, dir:'up', color:'#ffe680', on:false},
+      {x:1020, y:508, dir:'up', color:'#a0e8ff', on:false},
+    ],
+    doors: [{x:80, y:550, w:30, h:110, requiredSensors:[0,1], open:false}],
     exits: [{x:30, y:560, w:50, h:100}],
-    clearMsg: 'Stage 7 클리어! D1은 135°(\\), D2는 45°(/)여야 빛이 꺾여 센서에 닿습니다!'
+    clearMsg: 'Stage 7 클리어! 서로 다른 위치의 센서 두 개를 비스듬한 반사로 작동시켰습니다!'
   },
 
   /* ============== STAGE 8 ============== */
   {
     name: 'Stage 8',
-    description: '수평 거울(—) 등장! 4가지 각도 중 정확한 것을 찾아보세요.',
+    description: '세 개의 다이얼 - 각 빛과 같은 색 센서에 맞는 각도를 찾아야 합니다.',
     spawn: {x:80, y:580},
     platforms: [
       {x:0, y:660, w:1280, h:60},
@@ -886,54 +884,53 @@ const STAGES = [
       {x:900, y:640, w:60, h:20},
       {x:1080, y:640, w:80, h:20},
     ],
-    /* 설계: 광원(1220,300)left
-       D1(880,280 중심900,300): default=1(\) left→up, 정답=0(/) left→down → y=322내려감
-       D2(880,460 중심900,480): default=3(|) down→null, 정답=2(—) down→up → y=458올라감
-       빛 다시 위로→ D1(900,300)에서 / 각도: up→right → right로 진행
-       D3(1100,280 중심1120,300): default=0(/) right→up, 정답=1(\) right→down → 센서(1120,560) */
-    lightSources: [{x:1220, y:300, dir:'left', color:'#ffe680'}],
+    lightSources: [
+      {x:1220, y:300, dir:'left',  color:'#ffe680'},
+      {x:60,   y:480, dir:'right', color:'#a0e8ff'},
+      {x:1120, y:60,  dir:'down',  color:'#ff9bff'},
+    ],
     mirrors: [
-      {x:880, y:280, angle:1, dialId:'D1'},
-      {x:880, y:460, angle:3, dialId:'D2'},
-      {x:1100, y:280, angle:0, dialId:'D3'},
+      {x:880,  y:280, angle:3, angleDeg:80,  dialId:'D1'},
+      {x:880,  y:460, angle:1, angleDeg:130, dialId:'D2'},
+      {x:1100, y:180, angle:3, angleDeg:80,  dialId:'D3'},
     ],
     dials: [
-      {x:450, y:460, id:'D1', angle:1},
-      {x:770, y:520, id:'D2', angle:3},
-      {x:980, y:480, id:'D3', angle:0},
+      {x:450, y:460, id:'D1', angle:3, angleDeg:80},
+      {x:770, y:520, id:'D2', angle:1, angleDeg:130},
+      {x:980, y:480, id:'D3', angle:3, angleDeg:80},
     ],
     levers: [], switches: [],
     waterBlocks: [], glassBlocks: [], barriers: [],
-    sensors: [{x:1120, y:550, dir:'up', on:false}],
-    doors: [{x:80, y:550, w:30, h:110, requiredSensors:[0], open:false}],
+    sensors: [
+      {x:1092, y:461, dir:'up', color:'#ffe680', on:false},
+      {x:1076, y:332, dir:'up', color:'#a0e8ff', on:false},
+      {x:959,  y:392, dir:'up', color:'#ff9bff', on:false},
+    ],
+    doors: [{x:80, y:550, w:30, h:110, requiredSensors:[0,1,2], open:false}],
     exits: [{x:30, y:560, w:50, h:100}],
-    clearMsg: 'Stage 8 클리어! 수평거울(—)은 위↕아래 빛을 반사하는 특별한 거울입니다!'
+    clearMsg: 'Stage 8 클리어! 세 거울의 각도를 각각 다르게 맞춰 모든 센서를 켰습니다!'
   },
 
   /* ============== STAGE 9 ============== */
   {
     name: 'Stage 9',
-    description: '복합 퍼즐 - 4개 다이얼, 2개 센서. 넓은 맵을 탐험하며 경로를 설계하세요!',
+    description: '복합 퍼즐 - 4개 다이얼과 4개 색 센서. 빛과 같은 색 센서를 찾아 맞추세요!',
     spawn: {x:80, y:580},
     platforms: [
       {x:0, y:660, w:1280, h:60},
       {x:0, y:0, w:20, h:720},
       {x:1260, y:0, w:20, h:720},
-      // 좌측 구간
       {x:120, y:580, w:100, h:20},
       {x:280, y:540, w:100, h:20},
       {x:440, y:500, w:100, h:20},
       {x:440, y:560, w:100, h:20},
-      // 중앙 구간 (높은 발판)
       {x:600, y:460, w:100, h:20},
       {x:760, y:420, w:100, h:20},
       {x:760, y:560, w:100, h:20},
-      // 우측 구간
       {x:920, y:480, w:100, h:20},
       {x:920, y:560, w:100, h:20},
       {x:1080, y:440, w:100, h:20},
       {x:1080, y:560, w:140, h:20},
-      // 차단벽 (광학용)
       {x:640, y:180, w:40, h:25},
     ],
     hazards: [
@@ -943,76 +940,57 @@ const STAGES = [
       {x:700, y:640, w:80, h:20},
       {x:860, y:640, w:80, h:20},
       {x:1020, y:640, w:100, h:20},
-      {x:1200, y:640, w:40, h:20},
+      {x:1130, y:640, w:20, h:20},
     ],
-    /* 설계 (2광원, 2센서):
-       광원1 (60,200)right:
-         D1(380,180 중심400,200): default=3(|), 정답=1(\) right→down
-         → 빛 down at x=400 → 센서0(400,520) dir:up  ✓
-
-       광원2 (1220,400)left:
-         D2(880,380 중심900,400): default=0(/), 정답=1(\) left→up
-         → 빛 up at x=900 →
-         D3(880,180 중심900,200): default=2(—), 정답=0(/) up→right
-         → 빛 right at y=200 →
-         차단벽(640,180) 아래로 굴절블록 없으니 직진 →
-         D4(1100,180 중심1120,200): default=3(|), 정답=1(\) right→down
-         → 빛 down at x=1120 → 센서1(1120,480) dir:up  ✓
-    */
     lightSources: [
       {x:60,   y:200, dir:'right', color:'#ffe680'},
       {x:1220, y:400, dir:'left',  color:'#a0e8ff'},
+      {x:900,  y:60,  dir:'down',  color:'#ff9bff'},
+      {x:1220, y:200, dir:'left',  color:'#b8ff80'},
     ],
     mirrors: [
-      {x:380, y:180, angle:3, dialId:'D1'},
-      {x:880, y:380, angle:0, dialId:'D2'},
-      {x:880, y:180, angle:2, dialId:'D3'},
-      {x:1100,y:180, angle:3, dialId:'D4'},
+      {x:380,  y:180, angle:0, angleDeg:170, dialId:'D1'},
+      {x:880,  y:380, angle:3, angleDeg:70,  dialId:'D2'},
+      {x:880,  y:180, angle:0, angleDeg:30,  dialId:'D3'},
+      {x:1100, y:180, angle:1, angleDeg:110, dialId:'D4'},
     ],
     dials: [
-      {x:450, y:520, id:'D1', angle:3},
-      {x:620, y:420, id:'D2', angle:0},
-      {x:770, y:380, id:'D3', angle:2},
-      {x:1090,y:520, id:'D4', angle:3},
+      {x:450, y:460, id:'D1', angle:0, angleDeg:170},
+      {x:620, y:420, id:'D2', angle:3, angleDeg:70},
+      {x:770, y:380, id:'D3', angle:0, angleDeg:30},
+      {x:1090,y:520, id:'D4', angle:1, angleDeg:110},
     ],
     levers: [], switches: [],
     waterBlocks: [], glassBlocks: [], barriers: [],
     sensors: [
-      {x:400, y:500, dir:'up',  on:false},
-      {x:1120,y:420, dir:'up',  on:false},
+      {x:584,  y:354, dir:'up', color:'#ffe680', on:false},
+      {x:1145, y:489, dir:'up', color:'#a0e8ff', on:false},
+      {x:1116, y:325, dir:'up', color:'#ff9bff', on:false},
+      {x:1078, y:436, dir:'up', color:'#b8ff80', on:false},
     ],
-    doors: [{x:1180, y:540, w:30, h:120, requiredSensors:[0,1], open:false}],
+    doors: [{x:1180, y:540, w:30, h:120, requiredSensors:[0,1,2,3], open:false}],
     exits: [{x:1200, y:560, w:50, h:100}],
-    clearMsg: 'Stage 9 클리어! 두 갈래 빛을 각각 올바른 경로로 유도했습니다. 대단해요!'
+    clearMsg: 'Stage 9 클리어! 네 개의 다이얼을 모두 다른 반사 경로에 맞췄습니다. 대단해요!'
   },
 
   /* ============== STAGE 10 (FINAL) ============== */
-  /* ── 검증된 경로 설계 ──
-     광원1 (60,100)right → D1(\) right→down → D2(/) down→left → 센서0(100,400)
-     광원2 (60,200)right → D3(/) right→up   → D4(\) up→left  → 센서1(100,60)
-     광원3 (1220,300)left→ D5(\) left→up   → 센서2(1000,100 dir:down)
-     TRAP 레버: ON 시 광원2 경로 차단 → 실패
-  */
   {
     name: 'Stage 10',
-    description: '최후의 퍼즐! 5개 다이얼 + 3개 센서. 함정 레버를 조심하며 모든 경로를 완성하세요!',
+    description: '최후의 퍼즐! 5개 다이얼 + 5개 색 센서. 같은 색의 빛과 센서를 매칭하세요!',
     spawn: {x:80, y:580},
     platforms: [
       {x:0, y:660, w:1280, h:60},
       {x:0, y:0, w:20, h:720},
       {x:1260, y:0, w:20, h:720},
-      // 좌측 구간 (D1·D2 패널)
       {x:120, y:580, w:100, h:20},
       {x:280, y:540, w:80, h:20},
-      {x:280, y:460, w:80, h:20},   // D2 패널 발판 (panel y=420)
-      {x:460, y:500, w:80, h:20},   // D1 패널 발판 (panel y=460)
-      // 중앙 (함정 레버 + D3 패널)
-      {x:500, y:540, w:80, h:20},   // TRAP 레버 발판
-      {x:620, y:500, w:80, h:20},   // D3 패널 발판
+      {x:280, y:460, w:80, h:20},
+      {x:460, y:500, w:80, h:20},
+      {x:500, y:540, w:80, h:20},
+      {x:620, y:500, w:80, h:20},
       {x:620, y:580, w:80, h:20},
-      // 우측 (D4·D5 패널 + 출구)
-      {x:800, y:540, w:80, h:20},   // D4 패널 발판
-      {x:900, y:500, w:80, h:20},   // D5 패널 발판
+      {x:800, y:540, w:80, h:20},
+      {x:900, y:500, w:80, h:20},
       {x:1020, y:540, w:80, h:20},
       {x:1140, y:500, w:100, h:20},
       {x:1140, y:580, w:120, h:20},
@@ -1025,57 +1003,69 @@ const STAGES = [
       {x:780, y:640, w:80, h:20},
       {x:920, y:640, w:80, h:20},
       {x:1060,y:640, w:80, h:20},
-      {x:1200,y:640, w:40, h:20},
+      {x:1140,y:640, w:12, h:20},
     ],
     lightSources: [
-      {x:60,   y:100, dir:'right', color:'#ffe680'},   // 광원1
-      {x:60,   y:200, dir:'right', color:'#a0e8ff'},   // 광원2
-      {x:1220, y:300, dir:'left',  color:'#ff9bff'},   // 광원3
+      {x:60,   y:100, dir:'right', color:'#ffe680'},
+      {x:60,   y:400, dir:'right', color:'#a0e8ff'},
+      {x:60,   y:200, dir:'right', color:'#ff9bff'},
+      {x:800,  y:30,  dir:'down',  color:'#b8ff80'},
+      {x:1220, y:300, dir:'left',  color:'#ffd0a0'},
     ],
     mirrors: [
-      // D1: 기본 /(0), 정답 \(1) → right→down
-      {x:380, y:80,  angle:0, dialId:'D1'},
-      // D2: 기본 |(3), 정답 /(0) → down→left
-      {x:380, y:380, angle:3, dialId:'D2'},
-      // D3: 기본 \(1), 정답 /(0) → right→up
-      {x:780, y:180, angle:1, dialId:'D3'},
-      // D4: 기본 /(0), 정답 \(1) → up→left
-      {x:780, y:40,  angle:0, dialId:'D4'},
-      // D5: 기본 /(0), 정답 \(1) → left→up
-      {x:980, y:280, angle:0, dialId:'D5'},
+      {x:380, y:80,  angle:0, angleDeg:170, dialId:'D1'},
+      {x:380, y:380, angle:1, angleDeg:120, dialId:'D2'},
+      {x:780, y:180, angle:1, angleDeg:130, dialId:'D3'},
+      {x:780, y:40,  angle:3, angleDeg:90,  dialId:'D4'},
+      {x:980, y:280, angle:3, angleDeg:80,  dialId:'D5'},
     ],
     dials: [
-      {x:470, y:460, id:'D1', angle:0},   // 발판(460,500) 위
-      {x:290, y:420, id:'D2', angle:3},   // 발판(280,460) 위
-      {x:630, y:460, id:'D3', angle:1},   // 발판(620,500) 위
-      {x:810, y:500, id:'D4', angle:0},   // 발판(800,540) 위
-      {x:910, y:460, id:'D5', angle:0},   // 발판(900,500) 위
+      {x:470, y:460, id:'D1', angle:0, angleDeg:170},
+      {x:290, y:420, id:'D2', angle:1, angleDeg:120},
+      {x:630, y:460, id:'D3', angle:1, angleDeg:130},
+      {x:810, y:500, id:'D4', angle:3, angleDeg:90},
+      {x:910, y:460, id:'D5', angle:3, angleDeg:80},
     ],
-    levers:  [{x:510, y:500, id:'TRAP', on:false}],  // 함정: ON시 광원2 차단
+    levers:  [{x:510, y:500, id:'TRAP', on:false}],
     switches: [],
     waterBlocks: [], glassBlocks: [],
     barriers: [
-      // 광원2 경로(y=200) 위에 위치 - TRAP ON이면 닫힘
       {x:600, y:180, w:40, h:40, switchId:'TRAP', invert:true},
     ],
     sensors: [
-      {x:100, y:400, dir:'right', on:false},   // 센서0: 광원1 경로 끝
-      {x:100, y:60,  dir:'right', on:false},   // 센서1: 광원2 경로 끝
-      {x:1000,y:100, dir:'down',  on:false},   // 센서2: 광원3 경로 끝
+      {x:584,  y:254, dir:'up', color:'#ffe680', on:false},
+      {x:520,  y:192, dir:'up', color:'#a0e8ff', on:false},
+      {x:984,  y:46,  dir:'up', color:'#ff9bff', on:false},
+      {x:592,  y:180, dir:'up', color:'#b8ff80', on:false},
+      {x:1192, y:461, dir:'up', color:'#ffd0a0', on:false},
     ],
-    doors:   [{x:1180, y:540, w:30, h:120, requiredSensors:[0,1,2], open:false}],
+    doors:   [{x:1180, y:540, w:30, h:120, requiredSensors:[0,1,2,3,4], open:false}],
     exits:   [{x:1200, y:560, w:50, h:100}],
-    clearMsg: '🏆 Stage 10 클리어! 5개 다이얼과 3갈래 빛을 모두 완벽히 제어했습니다! 진정한 빛의 마스터!'
+    clearMsg: '🏆 Stage 10 클리어! 10도 단위 다이얼과 여러 방향의 비스듬한 센서를 모두 해결했습니다!'
   }
 ];
 // ===== 스테이지 로드 =====
 function loadStage(idx){
+  lifeResetPending = false;
   currentStageIdx = idx;
   const tpl = STAGES[idx];
   // 깊은 복사 (state 초기화)
   stage = JSON.parse(JSON.stringify(tpl));
-  // angle 초기 백업
-  stage.mirrors.forEach(m => { m._defaultAngle = m.angle; });
+  // angle 초기 백업 및 다이얼 각도 동기화
+  stage.mirrors.forEach(m => {
+    m._defaultAngle = m.angle;
+    if(m.dialId && typeof m.angleDeg !== 'number') m.angleDeg = angleToLineDeg(m.angle ?? 0);
+  });
+  (stage.dials || []).forEach(dl => {
+    if(typeof dl.angleDeg !== 'number') dl.angleDeg = angleToLineDeg(dl.angle ?? 0);
+    dl.angle = lineDegToNearestAngle(dl.angleDeg);
+    for(const m of stage.mirrors){
+      if(m.dialId === dl.id){
+        m.angleDeg = dl.angleDeg;
+        m.angle = dl.angle;
+      }
+    }
+  });
   stage.waterBlocks.forEach(b => { b._cur = 'A'; });
   stage.glassBlocks.forEach(b => { b._cur = 'A'; });
   stage.tutorialState = 0;     // 튜토리얼 진행도
@@ -1216,13 +1206,25 @@ function resolveCollisions(axis){
 }
 
 function loseLife(){
+  // Life가 0이 된 뒤 재시작 예약 중일 때는 같은 프레임/위치에서 반복 호출되지 않게 막는다.
+  if(lifeResetPending) return;
+
   life--;
   spawnHurtParticles(player.x + player.w/2, player.y + player.h/2);
   player.hurt = 1.0;
 
   if(life <= 0){
-    showMessage('Life를 모두 잃었습니다. 다시 시작합니다.', 1800);
+    lifeResetPending = true;
+    life = 0;
+    player.vx = 0;
+    player.vy = 0;
+    keys.left = false;
+    keys.right = false;
+    keys.up = false;
+    showMessage('Life를 모두 잃었습니다. Stage 1부터 다시 시작합니다.', 1800);
+    updateHUD();
     setTimeout(()=>{
+      hideMessage();
       // 튜토리얼이면 튜토리얼 재시작, 아니면 Stage 1
       if(currentStageIdx === 0) loadStage(0);
       else loadStage(1);
@@ -1288,16 +1290,18 @@ function tryInteract(){
   }
   if(target.type === 'dial'){
     const dl = target.obj;
-    dl.angle = (dl.angle + 1) % 4;
+    // 다이얼은 10도 단위로 회전합니다. 안내 문구는 띄우지 않습니다.
+    dl.angleDeg = (((dl.angleDeg ?? angleToLineDeg(dl.angle ?? 0)) + 10) % 180 + 180) % 180;
+    // 기존 4방향 표시는 호환용으로만 갱신합니다.
+    dl.angle = lineDegToNearestAngle(dl.angleDeg);
     // 연결된 거울 각도 동기화
     for(const m of stage.mirrors){
-      if(m.dialId === dl.id) m.angle = dl.angle;
+      if(m.dialId === dl.id){
+        m.angleDeg = dl.angleDeg;
+        m.angle = dl.angle;
+      }
     }
     spawnSparkle(dl.x+18, dl.y);
-    showMessage(
-      ['45° (/)', '135° (\\)', '0° (—)', '90° (|)'][dl.angle] + ' 로 설정됨',
-      900
-    );
   }
 }
 
@@ -1348,7 +1352,44 @@ function dirVec(dir){
     case 'up':    return {dx:0,dy:-1};
     case 'down':  return {dx:0,dy:1};
   }
+  if(dir && typeof dir.dx === 'number' && typeof dir.dy === 'number') return normalizeVec(dir);
   return {dx:0,dy:0};
+}
+
+function normalizeVec(v){
+  const len = Math.hypot(v.dx, v.dy) || 1;
+  return {dx:v.dx/len, dy:v.dy/len};
+}
+
+function degToRad(deg){ return deg * Math.PI / 180; }
+function radToDeg(rad){ return rad * 180 / Math.PI; }
+
+function angleToLineDeg(angle){
+  // 기존 4방향 거울과 새 10도 다이얼의 호환용 변환
+  return ([-45, 45, 0, 90][angle] ?? 0) + 180;
+}
+
+function lineDegToNearestAngle(deg){
+  const norm = ((deg % 180) + 180) % 180;
+  const candidates = [135, 45, 0, 90]; // /, \, —, |
+  let best = 0, bestD = Infinity;
+  for(let i=0;i<candidates.length;i++){
+    const d = Math.abs((((norm - candidates[i] + 90) % 180) + 180) % 180 - 90);
+    if(d < bestD){ bestD = d; best = i; }
+  }
+  return best;
+}
+
+function mirrorLineDeg(m){
+  if(typeof m.angleDeg === 'number') return ((m.angleDeg % 180) + 180) % 180;
+  return ((angleToLineDeg(m.angle) % 180) + 180) % 180;
+}
+
+function reflectVector(v, lineDeg){
+  const theta = degToRad(lineDeg);
+  const tx = Math.cos(theta), ty = Math.sin(theta);
+  const dot = v.dx * tx + v.dy * ty;
+  return normalizeVec({dx: 2 * dot * tx - v.dx, dy: 2 * dot * ty - v.dy});
 }
 
 function reflectDir(dir, mirrorAngle){
@@ -1365,12 +1406,19 @@ function reflectDir(dir, mirrorAngle){
   return null;
 }
 
+
+function colorsMatch(a, b){
+  if(!a || !b) return true;
+  return String(a).toLowerCase() === String(b).toLowerCase();
+}
+
 function traceRay(x, y, dir, color, depth, segments, ignoreObj){
-  if(depth > 16) return;
+  if(depth > 20) return;
   const v = dirVec(dir);
+  const dirName = (typeof dir === 'string') ? dir : null;
   let x1 = x, y1 = y;
   const step = 2;
-  let dist = 0, maxDist = 2000;
+  let dist = 0, maxDist = 2200;
 
   while(dist < maxDist){
     x += v.dx * step;
@@ -1392,9 +1440,7 @@ function traceRay(x, y, dir, color, depth, segments, ignoreObj){
     }
     if(!hitSolid){
       for(const b of stage.barriers||[]){
-        const sw = stage.switches.find(s=>s.id===b.switchId);
-        // 기본: switch OFF=barrier 닫힘 / switch ON=barrier 열림
-        // invert: switch ON=barrier 닫힘 / switch OFF=barrier 열림 (함정용)
+        const sw = stage.switches.find(s=>s.id===b.switchId) || stage.levers.find(s=>s.id===b.switchId);
         let closed;
         if(!sw){ closed = true; }
         else if(b.invert){ closed = sw.on; }
@@ -1413,16 +1459,32 @@ function traceRay(x, y, dir, color, depth, segments, ignoreObj){
       }
     }
     if(hitMirror){
-      // 거울 중심으로 선분 종료
       const cx = hitMirror.x + 20, cy = hitMirror.y + 20;
       segments.push({x1, y1, x2:cx, y2:cy, color});
-      const newDir = reflectDir(dir, hitMirror.angle);
-      if(!newDir) return;
-      // 거울 박스 밖으로 일단 빠져나간 좌표에서 새 광선 시작
-      const nv = dirVec(newDir);
-      const startX = cx + nv.dx * 22;
-      const startY = cy + nv.dy * 22;
-      traceRay(startX, startY, newDir, color, depth+1, segments, hitMirror);
+
+      if(hitMirror.dialId){
+        const newV = reflectVector(v, mirrorLineDeg(hitMirror));
+        const startX = cx + newV.dx * 22;
+        const startY = cy + newV.dy * 22;
+        traceRay(startX, startY, newV, color, depth+1, segments, hitMirror);
+        return;
+      }
+
+      // 일반 레버 거울은 기존 4방향 규칙을 유지합니다.
+      if(dirName){
+        const newDir = reflectDir(dirName, hitMirror.angle);
+        if(!newDir) return;
+        const nv = dirVec(newDir);
+        const startX = cx + nv.dx * 22;
+        const startY = cy + nv.dy * 22;
+        traceRay(startX, startY, newDir, color, depth+1, segments, hitMirror);
+        return;
+      }
+
+      const newV = reflectVector(v, mirrorLineDeg(hitMirror));
+      const startX = cx + newV.dx * 22;
+      const startY = cy + newV.dy * 22;
+      traceRay(startX, startY, newV, color, depth+1, segments, hitMirror);
       return;
     }
 
@@ -1443,8 +1505,6 @@ function traceRay(x, y, dir, color, depth, segments, ignoreObj){
       segments.push({x1, y1, x2:enterX, y2:enterY, color});
 
       const offset = blockType === 'water' ? 16 : 28;
-
-      // 블록 통과 출구 위치 계산 (입사 방향으로 직진 시 블록 반대쪽 면)
       let outX = enterX, outY = enterY;
       let through = 0;
       while(through < 200){
@@ -1454,30 +1514,31 @@ function traceRay(x, y, dir, color, depth, segments, ignoreObj){
              outY>=hitBlock.y && outY<=hitBlock.y+hitBlock.h)) break;
       }
 
-      // 굴절: 경계면에서만 꺾임. 매질 내부에서는 직진.
-      // 입사점에서 출사점까지 하나의 직선으로 표현하되,
-      // 출사점을 perp 방향으로 offset만큼 평행이동시켜
-      // 매질 내부에서 비스듬히 직진하는 모양을 만든다.
-      const perp = (v.dx === 0) ? {dx:1,dy:0} : {dx:0,dy:1};
+      let perp;
+      if(Math.abs(v.dx) < 0.001) perp = {dx:1, dy:0};
+      else if(Math.abs(v.dy) < 0.001) perp = {dx:0, dy:1};
+      else perp = normalizeVec({dx:-v.dy, dy:v.dx});
       const exitX = outX + perp.dx * offset;
       const exitY = outY + perp.dy * offset;
-      // 블록 내부: 입구 → 출구로 직선 하나 (V자 꺾임 제거)
       segments.push({x1:enterX, y1:enterY, x2:exitX, y2:exitY, color, refr:true});
 
-      // 출사 후: 원래 진행 방향(평행이동된 채)으로 다시 직진
       const newX = exitX + v.dx * 4;
       const newY = exitY + v.dy * 4;
       traceRay(newX, newY, dir, color, depth+1, segments, hitBlock);
       return;
     }
 
-    // 센서 충돌 (인식 범위 ±10px - 굴절/반사 정확도 요구)
+    // 센서 충돌: 센서에 color가 지정되어 있으면 같은 색 빛만 센서를 작동시킵니다.
     for(const s of stage.sensors){
-      if(x>=s.x-10 && x<=s.x+10 && y>=s.y-10 && y<=s.y+10){
-        s.on = true;
-        segments.push({x1, y1, x2:s.x, y2:s.y, color});
-        if(currentStageIdx === 0) tryTutorialAdvance('sensorOn');
-        return;
+      const r = s.radius || ((stage.dials && stage.dials.length) ? 18 : 10);
+      if(Math.hypot(x - s.x, y - s.y) <= r){
+        if(colorsMatch(s.color, color)){
+          s.on = true;
+          segments.push({x1, y1, x2:s.x, y2:s.y, color});
+          if(currentStageIdx === 0) tryTutorialAdvance('sensorOn');
+          return;
+        }
+        // 다른 색 빛은 센서를 통과하지만 작동시키지 않습니다.
       }
     }
   }
@@ -1565,12 +1626,7 @@ function draw(){
 
   // 5) 광선 계산 + 그리기
   const segs = computeLightPaths();
-  if(showPath){
-    drawLightSegments(segs);
-  } else {
-    // 빛만 안 보일 뿐, 센서는 동작
-    drawLightSegments(segs.slice(0,1)); // 광원 근처만 살짝
-  }
+  drawLightSegments(segs);
 
   // 6) 거울
   for(const m of stage.mirrors) drawMirror(m);
@@ -1583,6 +1639,9 @@ function draw(){
   for(const dl of (stage.dials||[])) drawDial(dl);
   for(const lv of stage.levers) drawLever(lv);
   for(const sw of stage.switches) drawSwitch(sw);
+
+  // 8-1) 조작 장치 ↔ 광학 기구 매칭 표시(가장 위에 다시 표시)
+  drawControlMatchOverlays();
 
   // 9) 문, 출구
   for(const d of stage.doors) drawDoor(d);
@@ -1664,6 +1723,178 @@ function drawHazard(h){
   ctx.shadowBlur = 0;
 }
 
+
+// ===== 조작 장치 ↔ 광학 기구 매칭 표시 =====
+const MATCH_COLORS = ['#ff6b6b', '#4dabf7', '#51cf66', '#ffd43b', '#cc5de8', '#ff922b', '#20c997', '#f06595', '#a9e34b', '#74c0fc'];
+function controlIdColor(id){
+  const str = String(id || '');
+  let n = 0;
+  for(let i=0;i<str.length;i++) n = (n * 31 + str.charCodeAt(i)) >>> 0;
+  return MATCH_COLORS[n % MATCH_COLORS.length];
+}
+function roundedRectPath(x,y,w,h,r){
+  const rr = Math.min(r, w/2, h/2);
+  ctx.beginPath();
+  ctx.moveTo(x+rr, y);
+  ctx.lineTo(x+w-rr, y);
+  ctx.quadraticCurveTo(x+w, y, x+w, y+rr);
+  ctx.lineTo(x+w, y+h-rr);
+  ctx.quadraticCurveTo(x+w, y+h, x+w-rr, y+h);
+  ctx.lineTo(x+rr, y+h);
+  ctx.quadraticCurveTo(x, y+h, x, y+h-rr);
+  ctx.lineTo(x, y+rr);
+  ctx.quadraticCurveTo(x, y, x+rr, y);
+}
+function drawMatchBadge(x, y, text, color){
+  if(!text) return;
+  ctx.save();
+  ctx.font = 'bold 12px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const label = String(text);
+  const bw = Math.max(32, ctx.measureText(label).width + 14);
+  const bh = 20;
+  roundedRectPath(x-bw/2, y-bh/2, bw, bh, 6);
+  ctx.fillStyle = 'rgba(12,12,20,0.88)';
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = color;
+  ctx.stroke();
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(label, x, y+0.5);
+  ctx.restore();
+}
+function collectControlLinks(){
+  const links = [];
+  if(!stage) return links;
+  for(const lv of stage.levers||[]){
+    const targets = (stage.mirrors||[]).filter(m => m.leverId === lv.id);
+    for(const t of targets){
+      links.push({kind:'lever', id:lv.id, x1:lv.x+18, y1:lv.y+22, x2:t.x+20, y2:t.y+20, target:t});
+    }
+  }
+  for(const sw of stage.switches||[]){
+    const blocks = [
+      ...(stage.waterBlocks||[]).filter(b => b.switchId === sw.id),
+      ...(stage.glassBlocks||[]).filter(b => b.switchId === sw.id),
+      ...(stage.barriers||[]).filter(b => b.switchId === sw.id),
+    ];
+    for(const t of blocks){
+      links.push({kind:'switch', id:sw.id, x1:sw.x+18, y1:sw.y+18, x2:t.x+t.w/2, y2:t.y+t.h/2, target:t});
+    }
+  }
+  for(const dl of stage.dials||[]){
+    const targets = (stage.mirrors||[]).filter(m => m.dialId === dl.id);
+    for(const t of targets){
+      links.push({kind:'dial', id:dl.id, x1:dl.x+18, y1:dl.y+18, x2:t.x+20, y2:t.y+20, target:t});
+    }
+  }
+  return links;
+}
+
+function drawControlLinks(){
+  const links = collectControlLinks();
+  if(!links.length) return;
+
+  ctx.save();
+  ctx.setLineDash([10, 7]);
+  ctx.lineCap = 'round';
+  for(const l of links){
+    const c = controlIdColor(l.id);
+    // 어두운 외곽선을 먼저 그려 배경·빛 위에서도 선이 보이게 함
+    ctx.globalAlpha = 0.70;
+    ctx.strokeStyle = 'rgba(0,0,0,0.95)';
+    ctx.lineWidth = 7;
+    ctx.shadowBlur = 0;
+    ctx.beginPath();
+    ctx.moveTo(l.x1, l.y1);
+    ctx.lineTo(l.x2, l.y2);
+    ctx.stroke();
+
+    ctx.globalAlpha = 0.95;
+    ctx.strokeStyle = c;
+    ctx.lineWidth = 4;
+    ctx.shadowColor = c;
+    ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.moveTo(l.x1, l.y1);
+    ctx.lineTo(l.x2, l.y2);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  ctx.save();
+  ctx.setLineDash([]);
+  for(const l of links){
+    const c = controlIdColor(l.id);
+    ctx.globalAlpha = 0.95;
+    ctx.fillStyle = c;
+    ctx.strokeStyle = 'rgba(0,0,0,0.9)';
+    ctx.lineWidth = 2;
+    ctx.shadowColor = c;
+    ctx.shadowBlur = 8;
+    ctx.beginPath(); ctx.arc(l.x1, l.y1, 6, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(l.x2, l.y2, 6, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawMatchRing(x, y, r, id){
+  const c = controlIdColor(id);
+  ctx.save();
+  ctx.globalAlpha = 0.98;
+  ctx.strokeStyle = 'rgba(0,0,0,0.95)';
+  ctx.lineWidth = 7;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.stroke();
+  ctx.strokeStyle = c;
+  ctx.lineWidth = 4;
+  ctx.shadowColor = c;
+  ctx.shadowBlur = 10;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.stroke();
+  ctx.restore();
+}
+
+function drawControlMatchOverlays(){
+  if(!stage) return;
+
+  // 조작 장치 쪽 표시
+  for(const lv of stage.levers||[]){
+    drawMatchRing(lv.x+18, lv.y+22, 25, lv.id);
+    drawMatchBadge(lv.x+18, lv.y-18, lv.id, controlIdColor(lv.id));
+  }
+  for(const sw of stage.switches||[]){
+    drawMatchRing(sw.x+18, sw.y+18, 25, sw.id);
+    drawMatchBadge(sw.x+18, sw.y-18, sw.id, controlIdColor(sw.id));
+  }
+  for(const dl of stage.dials||[]){
+    drawMatchRing(dl.x+18, dl.y+18, 28, dl.id);
+    drawMatchBadge(dl.x+18, dl.y+54, dl.id, controlIdColor(dl.id));
+  }
+
+  // 광학 기구 쪽 표시
+  for(const m of stage.mirrors||[]){
+    const id = m.dialId || m.leverId;
+    if(!id) continue;
+    drawMatchRing(m.x+20, m.y+20, 30, id);
+    drawMatchBadge(m.x+20, m.y-16, id, controlIdColor(id));
+  }
+  for(const b of stage.waterBlocks||[]){
+    if(!b.switchId) continue;
+    drawMatchRing(b.x+b.w/2, b.y+b.h/2, Math.max(b.w,b.h)/2+8, b.switchId);
+    drawMatchBadge(b.x+b.w/2, b.y-14, b.switchId, controlIdColor(b.switchId));
+  }
+  for(const b of stage.glassBlocks||[]){
+    if(!b.switchId) continue;
+    drawMatchRing(b.x+b.w/2, b.y+b.h/2, Math.max(b.w,b.h)/2+8, b.switchId);
+    drawMatchBadge(b.x+b.w/2, b.y-14, b.switchId, controlIdColor(b.switchId));
+  }
+  for(const b of stage.barriers||[]){
+    if(!b.switchId) continue;
+    drawMatchRing(b.x+b.w/2, b.y+b.h/2, Math.max(b.w,b.h)/2+8, b.switchId);
+    drawMatchBadge(b.x+b.w/2, b.y-14, b.switchId, controlIdColor(b.switchId));
+  }
+}
+
 function drawRefractBlock(b, type){
   ctx.save();
   if(type === 'water'){
@@ -1714,6 +1945,7 @@ function drawRefractBlock(b, type){
     ctx.textAlign = 'center';
     ctx.fillText('유리', b.x+b.w/2, b.y+b.h/2+5);
   }
+  if(b.switchId) drawMatchBadge(b.x+b.w/2, b.y-10, b.switchId, controlIdColor(b.switchId));
   ctx.restore();
 }
 
@@ -1728,6 +1960,7 @@ function drawBarrier(b){
   ctx.strokeStyle = closed ? '#ff6060' : '#80ff80';
   ctx.lineWidth = 2;
   ctx.strokeRect(b.x, b.y, b.w, b.h);
+  if(b.switchId) drawMatchBadge(b.x+b.w/2, b.y-10, b.switchId, controlIdColor(b.switchId));
 }
 
 function drawLightSegments(segs){
@@ -1755,18 +1988,39 @@ function drawLightSegments(segs){
 }
 
 function drawMirror(m){
+  const matchId = m.dialId || m.leverId || null;
+  const matchColor = matchId ? controlIdColor(matchId) : null;
   ctx.save();
   ctx.translate(m.x+20, m.y+20);
-  // 거울 배경 프레임 (다이얼 거울은 황금 테두리)
+  // 거울 배경 프레임: 연결된 조작 장치와 같은 색으로 표시
   ctx.fillStyle = '#3a3a4a';
   ctx.fillRect(-22,-22,44,44);
-  ctx.strokeStyle = m.dialId ? '#ffcc44' : '#8888aa';
-  ctx.lineWidth = m.dialId ? 3 : 2;
+  ctx.strokeStyle = matchColor || (m.dialId ? '#ffcc44' : '#8888aa');
+  ctx.lineWidth = matchId ? 4 : (m.dialId ? 3 : 2);
   ctx.strokeRect(-22,-22,44,44);
 
-  // 거울 면 (4방향)
+  // 거울 면
   ctx.lineWidth = 6;
-  if(m.angle === 0){ // /
+  if(m.dialId){
+    const deg = mirrorLineDeg(m);
+    const rad = degToRad(deg);
+    const x1 = Math.cos(rad) * -18;
+    const y1 = Math.sin(rad) * -18;
+    const x2 = Math.cos(rad) * 18;
+    const y2 = Math.sin(rad) * 18;
+    const g = ctx.createLinearGradient(x1,y1,x2,y2);
+    g.addColorStop(0,'#c0e0ff'); g.addColorStop(0.5,'#ffffff'); g.addColorStop(1,'#88a0c0');
+    ctx.strokeStyle = g;
+    ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+
+    // 10도 단위 조절감을 주는 작은 눈금
+    ctx.globalAlpha = 0.9;
+    ctx.strokeStyle = '#ffcc44';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.arc(0,0,24, -Math.PI, Math.PI);
+    ctx.stroke();
+  } else if(m.angle === 0){ // /
     const g = ctx.createLinearGradient(-20,20,20,-20);
     g.addColorStop(0,'#c0e0ff'); g.addColorStop(0.5,'#ffffff'); g.addColorStop(1,'#88a0c0');
     ctx.strokeStyle = g;
@@ -1788,20 +2042,22 @@ function drawMirror(m){
   ctx.globalAlpha = 0.7;
   ctx.beginPath(); ctx.arc(0,0,2,0,Math.PI*2); ctx.fill();
 
-  // 다이얼 거울 각도 뱃지
-  if(m.dialId){
-    const labels = ['/','\\','—','|'];
-    ctx.globalAlpha = 0.95;
-    ctx.fillStyle = '#1a1020';
-    ctx.beginPath(); ctx.arc(16,-16,9,0,Math.PI*2); ctx.fill();
-    ctx.strokeStyle = '#ffcc44'; ctx.lineWidth=1.5;
-    ctx.stroke();
-    ctx.fillStyle = '#ffcc44';
-    ctx.font = 'bold 10px monospace';
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(labels[m.angle], 16, -16);
+  // 조작 장치 매칭 뱃지
+  if(matchId){
+    ctx.globalAlpha = 1;
+    drawMatchBadge(0, -34, matchId, matchColor);
   }
   ctx.restore();
+}
+
+
+function hexToRgba(hex, alpha){
+  const m = String(hex || '#80b8ff').replace('#','');
+  const full = m.length === 3 ? m.split('').map(c=>c+c).join('') : m.padEnd(6, '0').slice(0,6);
+  const r = parseInt(full.slice(0,2), 16) || 0;
+  const g = parseInt(full.slice(2,4), 16) || 0;
+  const b = parseInt(full.slice(4,6), 16) || 0;
+  return `rgba(${r},${g},${b},${alpha})`;
 }
 
 function drawLightSource(ls){
@@ -1831,25 +2087,33 @@ function drawLightSource(ls){
 
 function drawSensor(s){
   ctx.save();
-  const color = s.on ? '#80ff80' : '#80b8ff';
-  // 외부 글로우
-  if(s.on){
-    const g = ctx.createRadialGradient(s.x,s.y,2,s.x,s.y,40);
-    g.addColorStop(0,'rgba(128,255,128,0.8)');
-    g.addColorStop(1,'rgba(128,255,128,0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(s.x-40, s.y-40, 80, 80);
-  }
+  const targetColor = s.color || '#80b8ff';
+  const color = targetColor;
+  // 외부 글로우 - 작동 전에도 목표 색을 희미하게 보여주고, 작동 후에는 강하게 빛납니다.
+  const glow = ctx.createRadialGradient(s.x,s.y,2,s.x,s.y, s.on ? 44 : 30);
+  glow.addColorStop(0, hexToRgba(targetColor, s.on ? 0.85 : 0.35));
+  glow.addColorStop(1, hexToRgba(targetColor, 0));
+  ctx.fillStyle = glow;
+  ctx.fillRect(s.x-44, s.y-44, 88, 88);
+
   // 본체
   ctx.fillStyle = '#1a2030';
   ctx.fillRect(s.x-15, s.y-15, 30, 30);
   ctx.strokeStyle = color;
-  ctx.lineWidth = 2;
+  ctx.lineWidth = s.on ? 3 : 2;
   ctx.strokeRect(s.x-15, s.y-15, 30, 30);
+
+  // 색상 매칭을 더 쉽게 보이도록 내부 고리 추가
+  ctx.strokeStyle = '#ffffff';
+  ctx.globalAlpha = s.on ? 0.85 : 0.45;
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(s.x-10, s.y-10, 20, 20);
+  ctx.globalAlpha = 1;
+
   // 렌즈
   ctx.fillStyle = color;
   ctx.shadowColor = color;
-  ctx.shadowBlur = s.on ? 14 : 6;
+  ctx.shadowBlur = s.on ? 16 : 7;
   ctx.beginPath(); ctx.arc(s.x,s.y,7,0,Math.PI*2); ctx.fill();
   ctx.shadowBlur = 0;
   ctx.fillStyle = '#fff';
@@ -1858,54 +2122,48 @@ function drawSensor(s){
 }
 
 function drawDial(dl){
+  const matchColor = controlIdColor(dl.id);
   ctx.save();
   ctx.translate(dl.x+18, dl.y+18);
+
+  const deg = ((dl.angleDeg ?? angleToLineDeg(dl.angle ?? 0)) % 180 + 180) % 180;
+  const pointerRad = degToRad(deg);
 
   // 외곽 링
   ctx.fillStyle = '#1e1830';
   ctx.beginPath(); ctx.arc(0,0,20,0,Math.PI*2); ctx.fill();
-  ctx.strokeStyle = '#ffcc44';
-  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = matchColor;
+  ctx.lineWidth = 3;
   ctx.beginPath(); ctx.arc(0,0,20,0,Math.PI*2); ctx.stroke();
 
-  // 4개 눈금 (0=/, 1=\, 2=—, 3=|)
-  const LABELS = ['/','\\','—','|'];
-  const COLORS = ['#ffe680','#a0e8ff','#80ffcc','#ff80cc'];
-  for(let i=0;i<4;i++){
-    const a = (i/4)*Math.PI*2 - Math.PI/2;
-    const active = (i === dl.angle);
-    ctx.strokeStyle = active ? COLORS[i] : '#445';
-    ctx.lineWidth   = active ? 3 : 1.5;
+  // 10도 단위 눈금: 숫자는 표시하지 않고 퍼즐용 조절감만 제공합니다.
+  for(let d=0; d<180; d+=10){
+    const a = degToRad(d);
+    const major = d % 30 === 0;
+    ctx.strokeStyle = Math.abs(d - deg) < 0.1 ? '#ffe680' : (major ? '#667' : '#445');
+    ctx.lineWidth = Math.abs(d - deg) < 0.1 ? 3 : (major ? 1.8 : 1);
     ctx.beginPath();
-    ctx.moveTo(Math.cos(a)*12, Math.sin(a)*12);
+    ctx.moveTo(Math.cos(a)*13, Math.sin(a)*13);
     ctx.lineTo(Math.cos(a)*19, Math.sin(a)*19);
     ctx.stroke();
   }
 
-  // 포인터 (현재 각도)
-  const pa = (dl.angle/4)*Math.PI*2 - Math.PI/2;
+  // 포인터 (현재 거울 방향)
   ctx.strokeStyle = '#ffcc44';
   ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(0,0);
-  ctx.lineTo(Math.cos(pa)*11, Math.sin(pa)*11); ctx.stroke();
+  ctx.lineTo(Math.cos(pointerRad)*13, Math.sin(pointerRad)*13); ctx.stroke();
   ctx.fillStyle = '#ffcc44';
-  ctx.beginPath(); ctx.arc(Math.cos(pa)*13, Math.sin(pa)*13, 3,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(Math.cos(pointerRad)*15, Math.sin(pointerRad)*15, 3,0,Math.PI*2); ctx.fill();
 
-  // 중앙 라벨
-  ctx.fillStyle = COLORS[dl.angle];
-  ctx.font = 'bold 9px monospace';
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText(LABELS[dl.angle], 0, 0);
+  // 중앙 표시: 각도 텍스트 대신 조작 가능한 다이얼임을 보여주는 점
+  ctx.fillStyle = '#ffe680';
+  ctx.beginPath(); ctx.arc(0,0,3,0,Math.PI*2); ctx.fill();
 
   ctx.restore();
 
-  // 하단 설명 텍스트
-  ctx.save();
-  ctx.fillStyle = '#ffcc44';
-  ctx.font = 'bold 10px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('다이얼', dl.x+18, dl.y+44);
-  ctx.restore();
+  // 하단 매칭 라벨
+  drawMatchBadge(dl.x+18, dl.y+48, dl.id, matchColor);
 
   // 상호작용 힌트 (플레이어 근처)
   const px = player.x+player.w/2, py = player.y+player.h/2;
@@ -1915,12 +2173,13 @@ function drawDial(dl){
 }
 
 function drawLever(lv){
+  const matchColor = controlIdColor(lv.id);
   ctx.save();
   // 베이스
   ctx.fillStyle = '#5a4528';
   ctx.fillRect(lv.x+4, lv.y+30, 28, 12);
-  ctx.strokeStyle = '#2a1f10';
-  ctx.lineWidth = 1;
+  ctx.strokeStyle = matchColor;
+  ctx.lineWidth = 2;
   ctx.strokeRect(lv.x+4, lv.y+30, 28, 12);
   // 손잡이
   const angle = lv.on ? 0.6 : -0.6;
@@ -1934,6 +2193,7 @@ function drawLever(lv){
   ctx.lineWidth = 1.5;
   ctx.stroke();
   ctx.restore();
+  drawMatchBadge(lv.x+18, lv.y-12, lv.id, matchColor);
 
   // 작동 가능 표시
   const px = player.x + player.w/2;
@@ -1944,11 +2204,12 @@ function drawLever(lv){
 }
 
 function drawSwitch(sw){
+  const matchColor = controlIdColor(sw.id);
   ctx.save();
   ctx.fillStyle = '#3a3050';
   ctx.fillRect(sw.x, sw.y, 36, 36);
-  ctx.strokeStyle = '#8888cc';
-  ctx.lineWidth = 2;
+  ctx.strokeStyle = matchColor;
+  ctx.lineWidth = 2.5;
   ctx.strokeRect(sw.x, sw.y, 36, 36);
   // 버튼
   ctx.fillStyle = sw.on ? '#80ff80' : '#cc6060';
@@ -1957,10 +2218,11 @@ function drawSwitch(sw){
   ctx.beginPath(); ctx.arc(sw.x+18, sw.y+18, 10,0,Math.PI*2); ctx.fill();
   ctx.shadowBlur = 0;
   ctx.fillStyle = '#fff';
-  ctx.font = 'bold 10px sans-serif';
+  ctx.font = 'bold 12px sans-serif';
   ctx.textAlign = 'center';
   ctx.fillText(sw.on ? 'ON' : 'OFF', sw.x+18, sw.y+22);
   ctx.restore();
+  drawMatchBadge(sw.x+18, sw.y-12, sw.id, matchColor);
 
   const px = player.x + player.w/2, py = player.y + player.h/2;
   if(Math.hypot(sw.x+18-px, sw.y+18-py) < 60){
@@ -2256,9 +2518,13 @@ function drawSprite(x, y, w, h){
   const dx = x + w * 0.5 - dw * 0.5;
   const dy = y + h - dh;
 
-  // 왼쪽을 바라본 상태에서 점프하면 jump.png를 좌우 반전해서 표시
-  // 오른쪽을 바라본 상태에서 점프하면 원본 jump.png 그대로 표시
-  if(pose === 'jump' && player.facing < 0){
+  // jump.png는 오른쪽 방향 기본 이미지이므로, 왼쪽을 바라보고 점프하면 좌우 반전
+  // stand.png는 왼쪽 방향 기본 이미지이므로, 오른쪽을 바라보고 멈추면 좌우 반전
+  const shouldFlip =
+    (pose === 'jump' && player.facing < 0) ||
+    (pose === 'stand' && player.facing > 0);
+
+  if(shouldFlip){
     ctx.save();
     ctx.translate(dx + dw / 2, dy + dh / 2);
     ctx.scale(-1, 1);
@@ -2322,9 +2588,6 @@ window.addEventListener('keydown', e => {
   if(e.key === 'r' || e.key === 'R'){
     if(gameState===STATE.PLAYING) loadStage(currentStageIdx);
   }
-  if(e.key === 'p' || e.key === 'P'){
-    if(!pathToggleLatch){ showPath = !showPath; pathToggleLatch = true; }
-  }
   if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
 });
 window.addEventListener('keyup', e => {
@@ -2332,7 +2595,6 @@ window.addEventListener('keyup', e => {
   if(e.key === 'ArrowRight'|| e.key === 'd'  || e.key === 'D') keys.right = false;
   if(e.key === 'ArrowUp'   || e.key === 'w'  || e.key === 'W' || e.key === ' ') keys.up = false;
   if(e.key === 'e' || e.key === 'E') actionLatch = false;
-  if(e.key === 'p' || e.key === 'P') pathToggleLatch = false;
 });
 
 // ===== 터치 컨트롤 =====
@@ -2352,7 +2614,6 @@ bindTouch('btnRight', ()=>keys.right=true, ()=>keys.right=false);
 bindTouch('btnJump',  ()=>keys.up=true,    ()=>keys.up=false);
 bindTouch('btnAct',   ()=>{ if(!actionLatch){ tryInteract(); actionLatch=true; } }, ()=>{ actionLatch=false; });
 bindTouch('btnReset', ()=>{ if(gameState===STATE.PLAYING) loadStage(currentStageIdx); }, null);
-bindTouch('btnPath',  ()=>{ showPath = !showPath; }, null);
 
 // 터치 디바이스 감지
 function isTouchDevice(){
